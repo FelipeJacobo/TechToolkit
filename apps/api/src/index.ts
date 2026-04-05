@@ -64,23 +64,12 @@ const jetStreamPublisher = await createJsPublisher(process.env.NATS_SERVERS ?? "
 // ============================================================
 
 const embedTexts = async (texts: string[]): Promise<number[][]> => {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) throw new Error("OPENAI_API_KEY missing");
-  const model = process.env.OPENAI_EMBEDDING_MODEL ?? "text-embedding-3-small";
-  const response = await fetch("https://api.openai.com/v1/embeddings", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({ model, input: texts }),
-  });
-  if (!response.ok) {
-    const errText = await response.text();
-    throw new Error(`embeddings_failed ${response.status} ${errText}`);
-  }
-  const data = (await response.json()) as { data: Array<{ embedding: number[] }> };
-  return data.data.map((item) => item.embedding);
+  const openai = (await import("../../src/core/openai.js")).getOpenAIClient({ timeoutMs: 120_000 });
+  if (!openai) throw new Error("OPENAI_API_KEY missing");
+
+  const result = await openai.embeddings({ input: texts });
+  if (!result.ok) throw new Error(result.error);
+  return result.embeddings;
 };
 
 // Safe: JSON string is fully parameterized — no SQL injection possible

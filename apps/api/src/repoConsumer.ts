@@ -53,7 +53,14 @@ export const startRepoConsumer = async () => {
 
         // 2. Chunk & embed
         const chunks = chunkText(payload.content, 800);
-        const vectors = await embed(chunks);
+
+        // Use centralized OpenAI client with timeout & retry
+        const openai = (await import("../../core/openai.js")).getOpenAIClient({ timeoutMs: 120_000 });
+        if (!openai) throw new Error("OPENAI_API_KEY not configured");
+
+        const embResult = await openai.embeddings({ input: chunks });
+        if (!embResult.ok) throw new Error(embResult.error);
+        const vectors = embResult.embeddings;
 
         // 3. Batch insert embeddings — single query, parameterized
         const rows: Array<[string, string, string]> = chunks.map((c, i) => [

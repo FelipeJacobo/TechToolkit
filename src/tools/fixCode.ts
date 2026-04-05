@@ -277,8 +277,8 @@ async function generateFixLLM(
   filePath: string,
   issue: FixCodeInput["issues"][number]
 ): Promise<{ content: string } | { error: string }> {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) return { error: "OPENAI_API_KEY not set" };
+  const client = (await import("../core/openai.js")).getOpenAIClient({ timeoutMs: 120_000 });
+  if (!client) return { error: "OPENAI_API_KEY not set" };
 
   const model = process.env.ANALYSIS_MODEL ?? process.env.AGENT_MODEL ?? "gpt-4o";
 
@@ -298,33 +298,19 @@ ${fileContent}
 Return the entire fixed file. Only change what's needed to fix the issue. Keep all other code identical.`;
 
   try {
-    const res = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model,
-        temperature: 0.1,
-        max_tokens: 8192,
-        messages: [
-          { role: "system", content: "You return ONLY corrected code. No markdown, no explanation." },
-          { role: "user", content: prompt },
-        ],
-      }),
+    const result = await client.chatCompletion({
+      model,
+      temperature: 0.1,
+      max_tokens: 8192,
+      messages: [
+        { role: "system", content: "You return ONLY corrected code. No markdown, no explanation." },
+        { role: "user", content: prompt },
+      ],
     });
 
-    if (!res.ok) {
-      const body = await res.text();
-      return { error: `OpenAI ${res.status}: ${body}` };
-    }
+    if (!result.ok) return { error: result.error };
 
-    const data = await res.json() as {
-      choices: Array<{ message: { content: string } }>;
-    };
-
-    let content = data.choices?.[0]?.message?.content?.trim() ?? "";
+    let content = result.content.trim();
 
     // Strip markdown fences if present
     if (content.startsWith("```")) {

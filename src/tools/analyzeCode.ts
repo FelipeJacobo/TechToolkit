@@ -247,72 +247,45 @@ export async function analyzeCode(
     };
   }
 
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) {
-    return { ok: false, error: "OPENAI_API_KEY not set" };
-  }
-
   const model = process.env.ANALYSIS_MODEL ?? "gpt-4o";
   const maxIssues = input.maxIssues ?? 50;
   const prompt = buildAnalysisPrompt(input, maxIssues);
 
+  const client = (await import("../core/openai.js")).getOpenAIClient({ timeoutMs: 120_000 });
+  if (!client) return { ok: false, error: "OPENAI_API_KEY not set" };
+
   try {
-    const response = await fetch(
-      "https://api.openai.com/v1/chat/completions",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
+    const result = await client.chatCompletion({
+      model,
+      response_format: { type: "json_object" },
+      temperature: 0.1,
+      max_tokens: 8192,
+      messages: [
+        {
+          role: "system",
+          content:
+            "You are a code analysis tool. You return ONLY valid JSON with code analysis results. Never add explanation outside the JSON object. Never use markdown formatting.",
         },
-        body: JSON.stringify({
-          model,
-          response_format: { type: "json_object" },
-          temperature: 0.1,
-          max_tokens: 8192,
-          messages: [
-            {
-              role: "system",
-              content:
-                "You are a code analysis tool. You return ONLY valid JSON with code analysis results. Never add explanation outside the JSON object. Never use markdown formatting.",
-            },
-            {
-              role: "user",
-              content: prompt,
-            },
-          ],
-        }),
-      }
-    );
+        {
+          role: "user",
+          content: prompt,
+        },
+      ],
+    });
 
-    if (!response.ok) {
-      const errorBody = await response.text();
-      return {
-        ok: false,
-        error: `OpenAI API error ${response.status}: ${errorBody}`,
-      };
-    }
-
-    const data = (await response.json()) as {
-      choices: Array<{ message: { content: string } }>;
-    };
-
-    const content = data.choices?.[0]?.message?.content;
-    if (!content) {
-      return { ok: false, error: "Empty response from OpenAI" };
-    }
+    if (!result.ok) return { ok: false, error: result.error };
 
     // Extract JSON from possible markdown wrapping
-    let jsonStr = content.trim();
+    let jsonStr = result.content.trim();
     if (jsonStr.startsWith("```")) {
       const match = jsonStr.match(/\{[\s\S]*\}/);
       if (match) jsonStr = match[0];
     }
 
     const parsed = JSON.parse(jsonStr) as Record<string, unknown>;
-    const result = AnalysisResultSchema.safeParse(parsed);
+    const validation = AnalysisResultSchema.safeParse(parsed);
 
-    if (!result.success) {
+    if (!validation.success) {
       // Try partial recovery
       const issues = Array.isArray(parsed.issues) ? parsed.issues : [];
       const score = typeof parsed.score === "number" ? parsed.score : 50;

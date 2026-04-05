@@ -248,34 +248,23 @@ export class PlannerAgent implements Agent {
   ): Promise<{ steps: PlanStep[]; estimatedCostUsd?: number; estimatedDurationMs?: number }> {
     const prompt = buildPlannerPrompt(goal, files, memories, tools);
 
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${this.openAIApiKey}`,
-      },
-      body: JSON.stringify({
-        model: this.model ?? "gpt-4o",
-        response_format: { type: "json_object" },
-        temperature: 0.15,
-        max_tokens: 4096,
-        messages: [
-          { role: "system", content: PLANNER_SYSTEM },
-          { role: "user", content: prompt },
-        ],
-      }),
+    const client = (await import("../core/openai.js")).getOpenAIClient({ timeoutMs: 90_000 });
+    if (!client) throw new Error("OPENAI_API_KEY not configured");
+
+    const result = await client.chatCompletion({
+      model: this.model ?? "gpt-4o",
+      response_format: { type: "json_object" },
+      temperature: 0.15,
+      max_tokens: 4096,
+      messages: [
+        { role: "system", content: PLANNER_SYSTEM },
+        { role: "user", content: prompt },
+      ],
     });
 
-    if (!response.ok) {
-      const body = await response.text();
-      throw new Error(`OpenAI API error ${response.status}: ${body}`);
-    }
+    if (!result.ok) throw new Error(result.error);
 
-    const data = await response.json();
-    const content = data.choices?.[0]?.message?.content;
-    if (!content) throw new Error("Empty response from OpenAI");
-
-    const jsonMatch = content.match(/\{[\s\S]*\}/);
+    const jsonMatch = result.content.match(/\{[\s\S]*\}/);
     if (!jsonMatch) throw new Error("No JSON found in OpenAI response");
 
     const parsed = JSON.parse(jsonMatch[0]);

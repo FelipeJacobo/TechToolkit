@@ -481,37 +481,30 @@ Return ONLY JSON:
 }`;
 
     try {
-      const response = await fetch("https://api.openai.com/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${this.openAIApiKey}`,
-        },
-        body: JSON.stringify({
-          model: this.model ?? "gpt-4o",
-          response_format: { type: "json_object" },
-          temperature: 0.1,
-          max_tokens: 1024,
-          messages: [
-            {
-              role: "system",
-              content: "You are a code reviewer. Return ONLY valid JSON. No markdown, no explanation.",
-            },
-            { role: "user", content: prompt },
-          ],
-        }),
+      const client = (await import("../core/openai.js")).getOpenAIClient({ timeoutMs: 60_000 });
+      if (!client) throw new Error("OPENAI_API_KEY not configured");
+
+      const result = await client.chatCompletion({
+        model: this.model ?? "gpt-4o",
+        response_format: { type: "json_object" },
+        temperature: 0.1,
+        max_tokens: 1024,
+        messages: [
+          {
+            role: "system",
+            content: "You are a code reviewer. Return ONLY valid JSON. No markdown, no explanation.",
+          },
+          { role: "user", content: prompt },
+        ],
       });
 
-      if (!response.ok) throw new Error(`OpenAI ${response.status}: ${await response.text()}`);
+      if (!result.ok) throw new Error(result.error);
 
       const data = (await response.json()) as {
         choices: Array<{ message: { content: string } }>;
       };
 
-      const content = data.choices?.[0]?.message?.content;
-      if (!content) throw new Error("Empty OpenAI response");
-
-      const jsonMatch = content.match(/\{[\s\S]*\}/);
+      const jsonMatch = result.content.match(/\{[\s\S]*\}/);
       if (!jsonMatch) throw new Error("No JSON in AI review response");
 
       const parsed = JSON.parse(jsonMatch[0]) as Record<string, unknown>;
