@@ -435,6 +435,13 @@ app.get("/auth/oauth/github/callback", async (req, reply) => {
     "INSERT INTO auth_sessions (user_id, refresh_hash, expires_at) VALUES ($1, encode(digest($2, 'sha256'), 'hex'), $3)",
     [userId, refreshToken, expiresAt],
   );
+  // 🔗 Store GitHub token for repo integration (hash + expiry)
+  // GitHub tokens don't expire by default unless revoked — set 1 year expiry
+  const githubTokenExpiry = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000);
+  await pool.query(
+    "UPDATE users SET github_token = encode(digest($1, 'sha256'), 'hex'), github_token_expires_at = $2 WHERE id = $3",
+    [tokenJson.access_token, githubTokenExpiry, userId],
+  );
   await logAudit(userId, null, "user.oauth", { provider: "github" });
   return reply.send({ accessToken, refreshToken });
 });
