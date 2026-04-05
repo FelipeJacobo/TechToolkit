@@ -1558,22 +1558,67 @@ app.post("/admin/retention/run", async (req, reply) => {
   if (!adminToken || req.headers["x-admin-token"] !== adminToken) {
     return reply.status(403).send({ error: "forbidden" });
   }
-  const cutoff = new Date(Date.now() - retentionDays * 86400000);
-  await pool.query("DELETE FROM logs WHERE created_at < $1", [cutoff]);
-  await pool.query("DELETE FROM traces WHERE created_at < $1", [cutoff]);
-  await pool.query(
-    "DELETE FROM embeddings WHERE created_at < $1",
-    [cutoff],
-  );
-  await pool.query(
-    "DELETE FROM repo_files WHERE created_at < $1",
-    [cutoff],
-  );
+
+  // 🛡️ Safety: no one should be able to delete less than 7 days
+  const MIN_RETENTION_DAYS = 7;
+  const effectiveDays = Math.max(retentionDays, MIN_RETENTION_DAYS);
+  if (retentionDays < MIN_RETENTION_DAYS) {
+    console.warn(`[admin/retention] RETENTION_DAYS=${retentionDays} overridden to ${MIN_RETENTION_DAYS} (minimum safety floor)`);
+  }
+
+  const cutoff = new Date(Date.now() - effectiveDays * 86400000);
+
+  // 🛡️ Soft-delete audit: count first, then delete. Return a report.
+  const counts = await Promise.all([
+    pool.query("SELECT COUNT(*)::int FROM logs WHERE created_at < $1", [cutoff]),
+    pool.query("SELECT COUNT(*)::int FROM traces WHERE created_at < $1", [cutoff]),
+    pool.query("SELECT COUNT(*)::int FROM embeddings WHERE created_at < $1", [cutoff]),
+    pool.query("SELECT COUNT(*)::int FROM repo_files WHERE created_at < $1", [cutoff]),
+  ]);
+
+  const report = {
+    cutoff: cutoff.toISOString(),
+    effectiveRetentionDays: effectiveDays,
+    rowsToDelete: {
+      logs: counts[0].rows[0].count,
+      traces: counts[1].rows[0].count,
+      embeddings: counts[2].rows[0].count,
+      repoFiles: counts[3].rows[0].count,
+      total: counts.reduce((sum, c) => sum + c.rows[0].count, 0),
+    },
+  };
+
+  if (report.rowsToDelete.total === 0) {
+    return reply.send({ ok: true, report, message: "Nothing to clean up" });
+  }
+
+  // Execute deletions
+  const deleted = await Promise.all([
+    pool.query("DELETE FROM logs WHERE created_at < $1", [cutoff]),
+    pool.query("DELETE FROM traces WHERE created_at < $1", [cutoff]),
+    pool.query("DELETE FROM embeddings WHERE created_at < $1", [cutoff]),
+    pool.query("DELETE FROM repo_files WHERE created_at < $1", [cutoff]),
+  ]);
+
+  const deletedReport = {
+    rowsDeleted: {
+      logs: deleted[0].rowCount,
+      traces: deleted[1].rowCount,
+      embeddings: deleted[2].rowCount,
+      repoFiles: deleted[3].rowCount,
+    },
+  };
+
   // Limpiar webhook_events procesados exitosamente > 90 días
   await pool.query(
     "DELETE FROM webhook_events WHERE status = 'processed' AND processed_at < NOW() - INTERVAL '90 days'",
   );
-  return reply.send({ ok: true });
+
+  return reply.send({
+    ok: true,
+    report: { ...report, ...deletedReport },
+    message: `Cleaned up ${report.rowsToDelete.total} rows older than ${effectiveDays} days`,
+  });
 });
 
 app.get(
