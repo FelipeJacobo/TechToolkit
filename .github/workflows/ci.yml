@@ -200,3 +200,37 @@ jobs:
           JWT_SECRET: test-jwt
           REDIS_PASSWORD: test_redis
           OPENAI_API_KEY: sk-fake-key
+
+  # ─────────────────────────────────────────────
+  # 6. Security scanning (always)
+  # ─────────────────────────────────────────────
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install API dependencies
+        run: npm ci
+        working-directory: ./apps/api
+
+      - name: Run npm audit (API)
+        run: npm audit --audit-level=high
+        working-directory: ./apps/api
+        continue-on-error: true
+
+      - name: Run npm audit (root / agent core)
+        run: npm audit --audit-level=high
+        continue-on-error: true
+
+      - name: Run Trivy config scan (docker-compose / IaC)
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'config'
+          scan-ref: '.'
+          format: 'table'
+          exit-code: '1'
+          severity: 'CRITICAL,HIGH'
