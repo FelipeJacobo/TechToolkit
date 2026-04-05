@@ -164,7 +164,7 @@ export class PlannerAgent implements Agent {
   async handle(event: EventEnvelope<unknown>): Promise<void> {
     const payload = event.payload as PlanRequest;
     const start = Date.now();
-    const { logInfo } = await import("../core/logging.js");
+    const { logInfo, logWarn } = await import("../core/logging.js");
 
     logInfo({ traceId: event.trace.traceId, agent: this.id, runId: payload.runId }, "Planning started");
 
@@ -181,13 +181,18 @@ export class PlannerAgent implements Agent {
         let estimatedCost = 0.01;
         let estimatedDuration = 10000;
 
-        if (this.openAIApiKey) {
+        // Try AI plan generation
+        const planClient = (await import("../core/openai.js")).getOpenAIClient({ timeoutMs: 90_000 });
+        if (planClient) {
           const result = await this.generatePlan(payload.goal, relevantFiles, memories, payload.availableTools || this.availableTools);
           plan = result.steps;
           estimatedCost = result.estimatedCostUsd ?? estimateCost(plan);
           estimatedDuration = result.estimatedDurationMs ?? estimateDuration(plan);
         } else {
+          // 🔍 No OpenAI key → fallback to heuristic planning
           plan = this.fallbackPlan(payload, relevantFiles);
+          logWarn({ traceId: event.trace.traceId, agent: this.id, reason: "no_openai_key" },
+            "Using heuristic fallback plan (no OpenAI API key configured)");
         }
 
         // 4. Validate
