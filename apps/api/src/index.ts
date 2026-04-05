@@ -1344,66 +1344,115 @@ app.post("/billing/webhook", async (req, reply) => {
   } catch {
     return reply.status(400).send({ error: "invalid_signature" });
   }
-  if (event.type === "checkout.session.completed") {
-    const session = event.data.object as {
-      metadata?: { userId?: string };
-    };
-    if (session.metadata?.userId) {
+
+  // 🔒 Idempotencia: rechazar eventos duplicados (replay attack protection)
+  const { rowCount: alreadyProcessed } = await pool.query(
+    "SELECT 1 FROM webhook_events WHERE stripe_event_id = $1",
+    [event.id],
+  );
+  if (alreadyProcessed && alreadyProcessed > 0) {
+    // Evento ya procesado — responder OK sin reprocesar
+    return reply.send({ received: true, duplicate: true });
+  }
+
+  // Marcar como procesado antes de ejecutar la lógica (fail-fast si falla el insert)
+  await pool.query(
+    "INSERT INTO webhook_events (stripe_event_id, event_type, created) VALUES ($1, $2, to_timestamp($3))",
+    [event.id, event.type, Math.floor(event.created * 1000) / 1000],
+  );
+
+  try {
+    if (event.type === "checkout.session.completed") {
+      const session = event.data.object as {
+        metadata?: { userId?: string };
+        subscription?: string;
+      };
+      if (session.metadata?.userId) {
+        await pool.query(
+          "INSERT INTO subscriptions (user_id, plan_code, status) VALUES ($1, 'pro', 'active') ON CONFLICT (user_id) DO UPDATE SET plan_code = 'pro', status = 'active'",
+          [session.metadata.userId],
+        );
+        await logAudit(
+          session.metadata.userId,
+          null,
+          "billing.upgrade",
+          { plan: "pro" },
+        );
+      }
+    }
+    if (event.type === "invoice.paid") {
+      const invoice = event.data.object as {
+        customer?: string;
+        billing_reason?: string;
+      };
       await pool.query(
-        "INSERT INTO subscriptions (user_id, plan_code, status) VALUES ($1, 'pro', 'active') ON CONFLICT (user_id) DO UPDATE SET plan_code = 'pro', status = 'active'",
-        [session.metadata.userId],
-      );
-      await logAudit(
-        session.metadata.userId,
-        null,
-        "billing.upgrade",
-        { plan: "pro" },
+        "INSERT INTO logs (run_id, level, message, meta) VALUES (NULL, $1, $2, $3)",
+        [
+          "billing",
+          "invoice.paid",
+          {
+            customer: invoice.customer,
+            reason: invoice.billing_reason,
+          },
+        ],
       );
     }
-  }
-  if (event.type === "invoice.paid") {
-    const invoice = event.data.object as {
-      customer?: string;
-      billing_reason?: string;
-    };
-    await pool.query(
-      "INSERT INTO logs (run_id, level, message, meta) VALUES (NULL, $1, $2, $3)",
-      [
-        "billing",
-        "invoice.paid",
-        {
-          customer: invoice.customer,
-          reason: invoice.billing_reason,
-        },
-      ],
-    );
-  }
-  if (event.type === "invoice.payment_failed") {
-    const invoice = event.data.object as {
-      customer?: string;
-      billing_reason?: string;
-    };
-    await pool.query(
-      "INSERT INTO logs (run_id, level, message, meta) VALUES (NULL, $1, $2, $3)",
-      [
-        "billing",
-        "invoice.payment_failed",
-        {
-          customer: invoice.customer,
-          reason: invoice.billing_reason,
-        },
-      ],
-    );
-  }
-  if (event.type === "customer.subscription.deleted") {
-    const sub = event.data.object as { customer?: string };
-    if (sub.customer) {
+    if (event.type === "invoice.payment_failed") {
+      const invoice = event.data.object as {
+        customer?: string;
+        billing_reason?: string;
+      };
       await pool.query(
-        "UPDATE subscriptions SET status = 'canceled' WHERE user_id IN (SELECT id FROM users WHERE stripe_customer_id = $1)",
-        [sub.customer],
+        "INSERT INTO logs (run_id, level, message, meta) VALUES (NULL, $1, $2, $3)",
+        [
+          "billing",
+          "invoice.payment_failed",
+          {
+            customer: invoice.customer,
+            reason: invoice.billing_reason,
+          },
+        ],
       );
     }
+    if (event.type === "customer.subscription.deleted") {
+      const sub = event.data.object as { customer?: string };
+      if (sub.customer) {
+        await pool.query(
+          "UPDATE subscriptions SET status = 'canceled' WHERE user_id IN (SELECT id FROM users WHERE stripe_customer_id = $1)",
+          [sub.customer],
+        );
+      }
+    }
+    if (event.type === "invoice.payment_action_required" || event.type === "payment_intent.payment_failed") {
+      // SCA / 3D Secure — el pago requiere acción del usuario
+      await pool.query(
+        "INSERT INTO logs (run_id, level, message, meta) VALUES (NULL, $1, $2, $3)",
+        [
+          "billing",
+          event.type,
+          { event_id: event.id },
+        ],
+      );
+    }
+    if (event.type === "customer.subscription.updated") {
+      // Cambio de plan (upgrade/downgrade/cancelación pendiente)
+      const sub = event.data.object as { customer?: string; status?: string };
+      if (sub.customer) {
+        await pool.query(
+          "UPDATE subscriptions SET status = $1 WHERE user_id IN (SELECT id FROM users WHERE stripe_customer_id = $2)",
+          [sub.status ?? "active", sub.customer],
+        );
+      }
+    }
+  } catch (err: any) {
+    // Marcar como fallido para debugging
+    await pool.query(
+      "UPDATE webhook_events SET status = 'failed', error = $1 WHERE stripe_event_id = $2",
+      [err.message, event.id],
+    );
+    throw err;
   }
+
   return reply.send({ received: true });
 });
 
@@ -1519,6 +1568,10 @@ app.post("/admin/retention/run", async (req, reply) => {
   await pool.query(
     "DELETE FROM repo_files WHERE created_at < $1",
     [cutoff],
+  );
+  // Limpiar webhook_events procesados exitosamente > 90 días
+  await pool.query(
+    "DELETE FROM webhook_events WHERE status = 'processed' AND processed_at < NOW() - INTERVAL '90 days'",
   );
   return reply.send({ ok: true });
 });
