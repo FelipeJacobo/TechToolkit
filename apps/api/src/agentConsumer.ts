@@ -17,8 +17,21 @@ const DLQ_NAME = "AIDEV_EVENTS_DLO";
 const MAX_RETRIES = 5;
 
 // Idempotencia: track de event IDs procesados (1h TTL)
+// 🛡️ Memory leak fix: periodic TTL-based cleanup every 5min instead of lazy 10k threshold
 const processed = new Map<string, number>();
 const IDEMPOTENCY_MS = 3_600_000;
+const IDEMPOTENCY_CLEANUP_MS = 300_000; // cleanup every 5 min
+
+// Proactive cleanup: remove expired entries on interval
+const cleanupInterval = setInterval(() => {
+  const cutoff = Date.now() - IDEMPOTENCY_MS;
+  for (const [k, v] of processed) {
+    if (v < cutoff) processed.delete(k);
+  }
+}, IDEMPOTENCY_CLEANUP_MS);
+
+// Don't block process exit
+if (typeof cleanupInterval.unref === "function") cleanupInterval.unref();
 
 type TenantEvent = {
   traceId: string;
@@ -67,12 +80,6 @@ function isDuplicate(id: string): boolean {
   const seen = processed.get(id);
   if (seen && Date.now() - seen < IDEMPOTENCY_MS) return true;
   processed.set(id, Date.now());
-  if (processed.size > 10000) {
-    const cutoff = Date.now() - IDEMPOTENCY_MS;
-    for (const [k, v] of processed) {
-      if (v < cutoff) processed.delete(k);
-    }
-  }
   return false;
 }
 
