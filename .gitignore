@@ -1,0 +1,35 @@
+# Node
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Env
+.env
+.env.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Logs
+*.log
+
+# Build outputs
+.next/
+coverage/
+
+# OpenClaw workspace config (never track)
+.openclaw/
+memory/
+AGENTS.md
+BOOTSTRAP.md
+HEARTBEAT.md
+IDENTITY.md
+SOUL.md
+TOOLS.md
+USER.md

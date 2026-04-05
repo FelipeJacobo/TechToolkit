@@ -1,0 +1,140 @@
+{
+  "name": "aiclew-dev-assistant",
+  "displayName": "AI Dev Assistant",
+  "description": "Analyze code with AI agents — powered by AI Dev Assistant V4",
+  "version": "0.1.0",
+  "publisher": "aiclew",
+  "engines": { "vscode": "^1.85.0" },
+  "categories": ["Other"],
+  "activationEvents": ["onStartupFinished"],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "aiclew.analyzeSelection",
+        "title": "Analyze with AI",
+        "category": "AI Dev Assistant"
+      },
+      {
+        "command": "aiclew.analyzeFile",
+        "title": "Analyze Current File",
+        "category": "AI Dev Assistant"
+      },
+      {
+        "command": "aiclew.analyzeProject",
+        "title": "Analyze Entire Project",
+        "category": "AI Dev Assistant"
+      },
+      {
+        "command": "aiclew.showPanel",
+        "title": "Show Analysis Panel",
+        "category": "AI Dev Assistant"
+      },
+      {
+        "command": "aiclew.login",
+        "title": "Login to AI Dev Assistant",
+        "category": "AI Dev Assistant"
+      },
+      {
+        "command": "aiclew.logout",
+        "title": "Logout",
+        "category": "AI Dev Assistant"
+      },
+      {
+        "command": "aiclew.quickAnalysis",
+        "title": "Quick Analysis: Selected Text",
+        "category": "AI Dev Assistant"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "aiclew.analyzeSelection",
+          "group": "aiclew@1",
+          "when": "editorHasSelection"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "aiclew.analyzeFile",
+          "group": "aiclew@2",
+          "when": "explorerResourceIsFile"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "aiclew.analyzeProject",
+          "when": "view == aiclew.sidebar",
+          "group": "navigation"
+        },
+        {
+          "command": "aiclew.login",
+          "when": "view == aiclew.sidebar && !aiclew.loggedIn",
+          "group": "navigation"
+        },
+        {
+          "command": "aiclew.logout",
+          "when": "view == aiclew.sidebar && aiclew.loggedIn",
+          "group": "navigation"
+        }
+      ]
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "aiclew-activitybar",
+          "title": "AI Dev Assistant",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "aiclew-activitybar": [
+        {
+          "id": "aiclew.sidebar",
+          "name": "AI Analysis",
+          "type": "webview"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "AI Dev Assistant",
+      "properties": {
+        "aiclew.apiUrl": {
+          "type": "string",
+          "default": "http://localhost:8081",
+          "description": "URL of the AI Dev Assistant API"
+        },
+        "aiclew.apiKey": {
+          "type": "string",
+          "default": "",
+          "description": "API key for authentication"
+        },
+        "aiclew.defaultModel": {
+          "type": "string",
+          "default": "gpt-4o",
+          "description": "Default model for analysis"
+        },
+        "aiclew.autoFix": {
+          "type": "boolean",
+          "default": false,
+          "description": "Automatically apply fixes after analysis"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run build",
+    "build": "esbuild ./src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node",
+    "watch": "npm run build -- --sourcemap --watch",
+    "compile": "tsc --noEmit",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.85.0",
+    "@types/node": "^20.0.0",
+    "typescript": "^5.3.0",
+    "esbuild": "^0.19.0",
+    "@vscode/vsce": "^2.22.0"
+  }
+}
