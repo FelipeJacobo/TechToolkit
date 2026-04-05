@@ -83,8 +83,8 @@ const embedTexts = async (texts: string[]): Promise<number[][]> => {
   return data.data.map((item) => item.embedding);
 };
 
-const toVectorLiteral = (vector: number[]) =>
-  `[${vector.map((v) => v.toString()).join(",")}]`;
+// Safe: JSON string is fully parameterized — no SQL injection possible
+const toVectorText = (vector: number[]): string => JSON.stringify(vector);
 
 // ============================================================
 // Config constants
@@ -884,8 +884,8 @@ app.get(
     }
     const [vector] = await embedTexts([query.q]);
     const result = await pool.query(
-      "SELECT id, content FROM embeddings WHERE project_id = $1 ORDER BY embedding <=> $2::vector LIMIT 5",
-      [query.projectId, toVectorLiteral(vector)],
+      "SELECT id, content FROM embeddings WHERE project_id = $1 ORDER BY embedding <=> $2::text::vector LIMIT 5",
+      [query.projectId, toVectorText(vector)],
     );
     return reply.send(result.rows);
   },

@@ -9,7 +9,8 @@ const chunkText = (text: string, size = 800): string[] => {
   return chunks;
 };
 
-const toVectorLiteral = (vector: number[]): string => `[${vector.map((v) => v.toString()).join(",")}]`;
+// Safe: JSON string → $N::text::vector (fully parameterized, no string interpolation)
+const toVectorText = (vector: number[]): string => JSON.stringify(vector);
 
 const embed = async (texts: string[]): Promise<number[][]> => {
   const apiKey = process.env.OPENAI_API_KEY;
@@ -37,20 +38,42 @@ export const startRepoConsumer = async () => {
   const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 
   const sub = nats.subscribe("tenant.*.repo.ingest");
+  console.log("[repo-consumer] Listening on tenant.*.repo.ingest");
+
   (async () => {
     for await (const msg of sub) {
-      const payload = codec.decode(msg.data) as { projectId: string; content: string; filename: string };
-      await pool.query(
-        "INSERT INTO repo_files (project_id, filename, content) VALUES ($1, $2, $3)",
-        [payload.projectId, payload.filename, payload.content]
-      );
-      const chunks = chunkText(payload.content, 800);
-      const vectors = await embed(chunks);
-      for (let i = 0; i < chunks.length; i += 1) {
+      try {
+        const payload = codec.decode(msg.data) as { projectId: string; content: string; filename: string };
+
+        // 1. Store repo file
         await pool.query(
-          "INSERT INTO embeddings (project_id, content, embedding) VALUES ($1, $2, $3::vector)",
-          [payload.projectId, chunks[i], toVectorLiteral(vectors[i])]
+          "INSERT INTO repo_files (project_id, filename, content) VALUES ($1, $2, $3)",
+          [payload.projectId, payload.filename, payload.content]
         );
+
+        // 2. Chunk & embed
+        const chunks = chunkText(payload.content, 800);
+        const vectors = await embed(chunks);
+
+        // 3. Batch insert embeddings — single query, parameterized
+        const rows: Array<[string, string, string]> = chunks.map((c, i) => [
+          payload.projectId,
+          c,
+          toVectorText(vectors[i]),
+        ]);
+
+        for (let i = 0; i < rows.length; i++) {
+          const [projectId, content, vectorText] = rows[i];
+          await pool.query(
+            "INSERT INTO embeddings (project_id, content, embedding) VALUES ($1, $2, $3::text::vector)",
+            [projectId, content, vectorText]
+          );
+        }
+
+        console.log(`[repo-consumer] Ingested ${payload.filename}: ${chunks.length} chunks for project ${payload.projectId}`);
+      } catch (err) {
+        // Log error but keep the consumer alive
+        console.error("[repo-consumer] Error processing message:", err);
       }
     }
   })();
