@@ -27,7 +27,7 @@ export class IsolatedVMSandbox implements Sandbox {
     await jail.set("global", jail.derefInto());
 
     const compiled = await isolate.compileScript(`"use strict";${script}`);
-    const result = await compiled.run(context, { timeout: policy.timeoutMs ?? 500 });
+    const result = await compiled.run(context, { timeout: policy.timeoutMs ?? 3_000 });
     return result;
   }
 }
