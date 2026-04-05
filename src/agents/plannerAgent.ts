@@ -395,13 +395,36 @@ export class PlannerAgent implements Agent {
 // ============================================================
 
 function detectLanguage(files: Array<{ path: string }>): string {
-  const ext = files[0]?.path?.split(".").pop()?.toLowerCase() || "";
-  const map: Record<string, string> = {
+  const extMap: Record<string, string> = {
     ts: "typescript", tsx: "tsx", js: "javascript", jsx: "jsx",
     py: "python", rb: "ruby", go: "go", rs: "rust",
     java: "java", sql: "sql", sh: "shell", md: "markdown",
+    css: "css", scss: "scss", html: "html", json: "json", yaml: "yaml", yml: "yaml",
+    vue: "vue", svelte: "svelte", php: "php", kt: "kotlin", swift: "swift",
   };
-  return map[ext] || "plaintext";
+
+  // Count files per language
+  const langCount: Record<string, number> = {};
+  for (const f of files) {
+    const ext = f.path?.split(".").pop()?.toLowerCase() || "";
+    const lang = extMap[ext] || "plaintext";
+    langCount[lang] = (langCount[lang] ?? 0) + 1;
+  }
+
+  // Return dominant language (>50%) or "mixed" if none dominates
+  const total = files.length;
+  if (total === 0) return "plaintext";
+  for (const [lang, count] of Object.entries(langCount)) {
+    if (count / total > 0.5) return lang;
+  }
+
+  // No dominant language → return the most common one
+  let dominant = "plaintext";
+  let maxCount = 0;
+  for (const [lang, count] of Object.entries(langCount)) {
+    if (count > maxCount) { maxCount = count; dominant = lang; }
+  }
+  return `${dominant}+${Object.keys(langCount).length - 1}`;
 }
 
 function estimateCost(steps: PlanStep[]): number {
