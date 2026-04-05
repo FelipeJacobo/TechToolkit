@@ -260,8 +260,19 @@ server.listen({ port, host: "0.0.0.0" }, (err, address) => {
 });
 
 process.on("SIGINT", async () => {
+  console.log("[agent-core] Received SIGINT — shutting down gracefully...");
+  await shutdown();
+});
+
+process.on("SIGTERM", async () => {
+  console.log("[agent-core] Received SIGTERM — shutting down gracefully...");
+  await shutdown();
+});
+
+async function shutdown() {
   if (bus instanceof NatsBus) {
+    logInfo({ step: "shutdown" }, "Closing NATS connection...");
     await bus.close();
   }
   process.exit(0);
-});
+}
