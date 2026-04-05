@@ -485,7 +485,7 @@ Return ONLY JSON:
       if (!client) throw new Error("OPENAI_API_KEY not configured");
 
       const result = await client.chatCompletion({
-        model: this.model ?? "gpt-4o",
+        model: this.model,
         response_format: { type: "json_object" },
         temperature: 0.1,
         max_tokens: 1024,

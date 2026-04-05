@@ -59,8 +59,10 @@ export const config: AppConfig = {
   cost: {
     maxRunUsd: Number(process.env.COST_MAX_RUN_USD ?? 5),
     maxStepUsd: Number(process.env.COST_MAX_STEP_USD ?? 1),
-    defaultModel: process.env.COST_DEFAULT_MODEL ?? "gpt-4o-mini",
+    defaultModel: process.env.AGENT_MODEL ?? process.env.ANALYSIS_MODEL ?? "gpt-4o",
+
     modelRates: {
+      "gpt-4o": { inputPer1k: 0.0025, outputPer1k: 0.01 },
       "gpt-4o-mini": { inputPer1k: 0.00015, outputPer1k: 0.0006 },
       "gpt-4.1-mini": { inputPer1k: 0.0003, outputPer1k: 0.0012 },
       "text-embedding-3-small": { inputPer1k: 0.00002, outputPer1k: 0 }

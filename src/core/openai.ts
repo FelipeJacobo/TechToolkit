@@ -56,7 +56,7 @@ export class OpenAIClient {
     req: ChatCompletionRequest
   ): Promise<{ ok: true; content: string; model?: string } | { ok: false; error: string }> {
     const body = {
-      model: req.model ?? "gpt-4o",
+      model: req.model ?? process.env.AGENT_MODEL ?? process.env.ANALYSIS_MODEL ?? "gpt-4o",
       messages: req.messages,
       temperature: req.temperature ?? 0.1,
       max_tokens: req.max_tokens ?? 4096,
