@@ -1543,7 +1543,7 @@ app.get(
   },
 );
 
-// FIX #7: Proper CSV export
+// ✅ Proper CSV export with pagination + hard limit
 app.get(
   "/audit/export",
   { preHandler: [app.authenticate] },
@@ -1551,18 +1551,99 @@ app.get(
     if (req.apiKeyId)
       return reply.status(403).send({ error: "forbidden" });
     const userId = (req.user as { userId: string }).userId;
+    const query = req.query as { page?: string; limit?: string; from?: string; to?: string };
+
+    // Pagination defaults
+    const page = Math.max(1, parseInt(query.page ?? "1", 10) || 1);
+    const limit = Math.min(10_000, Math.max(1, parseInt(query.limit ?? "1000", 10) || 1000));
+    const offset = (page - 1) * limit;
+
+    // Build filter query
+    const conditions: string[] = ["user_id = $1"];
+    const params: unknown[] = [userId];
+    let paramIdx = 2;
+
+    if (query.from) {
+      conditions.push(`created_at >= $${paramIdx}`);
+      params.push(new Date(query.from));
+      paramIdx++;
+    }
+    if (query.to) {
+      conditions.push(`created_at <= $${paramIdx}`);
+      params.push(new Date(query.to));
+      paramIdx++;
+    }
+
+    const where = conditions.join(" AND ");
+
+    // Count total for pagination metadata
+    const [{ count }] = (
+      await pool.query(`SELECT COUNT(*)::int FROM audit_logs WHERE ${where}`, params)
+    ).rows;
+
+    // Fetch paginated
+    params.push(offset, limit);
     const result = await pool.query(
-      "SELECT action, meta, created_at FROM audit_logs WHERE user_id = $1 ORDER BY created_at DESC",
-      [userId],
+      `SELECT action, meta, created_at FROM audit_logs WHERE ${where} ORDER BY created_at DESC OFFSET $${paramIdx} LIMIT $${paramIdx + 1}`,
+      params,
     );
-    // Proper CSV escaping: wrap in quotes, double any internal quotes
-    const escapeCsv = (val: string) => `"${val.replace(/"/g, '""')}"`;
+
+    const escapeCsv = (val: unknown): string => {
+      const str = val === null || val === undefined ? "" : typeof val === "string" ? val : JSON.stringify(val);
+      return `"${str.replace(/"/g, '""')}"`;
+    };
+
+    return reply.send({
+      total: count,
+      page,
+      limit,
+      hasMore: page * limit < count,
+      data: result.rows.map((r) => ({
+        action: r.action,
+        created_at: r.created_at,
+        meta: r.meta,
+      })),
+    });
+  },
+);
+
+// 📄 Download as CSV (separate endpoint, still paginated but streams response)
+app.get(
+  "/audit/export/csv",
+  { preHandler: [app.authenticate] },
+  async (req, reply) => {
+    if (req.apiKeyId)
+      return reply.status(403).send({ error: "forbidden" });
+    const userId = (req.user as { userId: string }).userId;
+    const query = req.query as { limit?: string; from?: string; to?: string };
+
+    const limit = Math.min(10_000, parseInt(query.limit ?? "5000", 10) || 5000);
+
+    const conditions: string[] = ["user_id = $1"];
+    const params: unknown[] = [userId];
+    let paramIdx = 2;
+
+    if (query.from) { conditions.push(`created_at >= $${paramIdx}`); params.push(new Date(query.from)); paramIdx++; }
+    if (query.to) { conditions.push(`created_at <= $${paramIdx}`); params.push(new Date(query.to)); paramIdx++; }
+
+    params.push(limit);
+    const result = await pool.query(
+      `SELECT action, meta, created_at FROM audit_logs WHERE ${conditions.join(" AND ")} ORDER BY created_at DESC LIMIT $${paramIdx}`,
+      params,
+    );
+
+    const escapeCsv = (val: unknown): string => {
+      const str = val === null || val === undefined ? "" : typeof val === "string" ? val : JSON.stringify(val);
+      return `"${str.replace(/"/g, '""')}"`;
+    };
+
     const header = "action,created_at,meta";
     const rows = result.rows.map(
-      (r) =>
-        `${escapeCsv(r.action)},${escapeCsv(r.created_at.toISOString())},${escapeCsv(typeof r.meta === 'string' ? r.meta : JSON.stringify(r.meta))}`,
+      (r) => `${escapeCsv(r.action)},${escapeCsv(r.created_at?.toISOString())},${escapeCsv(r.meta)}`,
     );
+
     reply.header("Content-Type", "text/csv");
+    reply.header("Content-Disposition", `attachment; filename="audit_export_${new Date().toISOString().slice(0, 10)}.csv"`);
     return [header, ...rows].join("\n");
   },
 );
