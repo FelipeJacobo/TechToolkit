@@ -103,9 +103,38 @@ function unauthorized(reply: FastifyReply, reason = "unauthorized") {
 // REGISTER + LOGIN — use pgcrypto crypt() (no bcrypt pkg needed)
 // ============================================================
 
-export async function registerAuth(app: FastifyInstance, pool: Pool): Promise<void> {
+export async function registerAuth(app: FastifyInstance, pool: Pool, redis?: import("ioredis").Redis): Promise<void> {
+
+  // ============================================================
+  // IP Rate limiting helpers
+  // ============================================================
+
+  const IP_LOGIN_WINDOW_MS = Number(process.env.IP_RATE_LIMIT_WINDOW_MS ?? 60_000);
+  const IP_LOGIN_MAX = Number(process.env.IP_RATE_LIMIT_MAX ?? 20);
+
+  const ipRateLimit = async (req: FastifyRequest, reply: FastifyReply): Promise<boolean> => {
+    if (!redis) return true; // No Redis → skip (dev fallback)
+    const ip =
+      (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim()
+      ?? req.ip
+      ?? "unknown";
+    const key = `ip_rl:${ip}`;
+    try {
+      const current = await redis.incr(key);
+      if (current === 1) await redis.pexpire(key, IP_LOGIN_WINDOW_MS);
+      if (current > IP_LOGIN_MAX) {
+        reply.status(429).send({ error: "rate_limited", retryAfterMs: IP_LOGIN_WINDOW_MS });
+        return false;
+      }
+    } catch {
+      // Redis failure → don't block legitimate traffic, just log
+      console.warn("[auth] IP rate limit check failed (Redis error)");
+    }
+    return true;
+  };
   // ---- POST /auth/register ----
   app.post("/auth/register", async (req: FastifyRequest<{ Body: z.infer<typeof RegisterSchema> }>, reply: FastifyReply) => {
+    if (!(await ipRateLimit(req, reply))) return;
     const parsed = RegisterSchema.safeParse(req.body);
     if (!parsed.success) return badRequest(reply, parsed.error.issues);
 
@@ -176,6 +205,7 @@ export async function registerAuth(app: FastifyInstance, pool: Pool): Promise<vo
 
   // ---- POST /auth/login ----
   app.post("/auth/login", async (req: FastifyRequest<{ Body: z.infer<typeof LoginSchema> }>, reply: FastifyReply) => {
+    if (!(await ipRateLimit(req, reply))) return;
     const parsed = LoginSchema.safeParse(req.body);
     if (!parsed.success) return badRequest(reply, parsed.error.issues);
 

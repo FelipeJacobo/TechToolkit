@@ -51,9 +51,9 @@ const nats = await connect({
 
 const codec = JSONCodec<Record<string, unknown>>();
 
-// FIX #3 (part a): Use the modular auth system from auth.ts
+// FIX #3 (part a): Use the modular auth system from auth.ts — with IP rate limiting
 const { registerAuth } = await import("./auth.js");
-await registerAuth(app, pool);
+await registerAuth(app, pool, redis);
 
 // JetStream publisher singleton (used by /agent/run-task and /chat)
 const { createJsPublisher } = await import("./jetStreamPublisher.js");
