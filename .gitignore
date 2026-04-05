@@ -1,35 +1,40 @@
-# Node
+# ─── Node ─────────────────────────────────────
 node_modules/
 dist/
 *.tsbuildinfo
 
-# Env
+# ─── Env ──────────────────────────────────────
 .env
 .env.local
+.env.*.local
 
-# OS
+# ─── OS ───────────────────────────────────────
 .DS_Store
 Thumbs.db
 
-# IDE
-.vscode/
+# ─── IDE ──────────────────────────────────────
+.vscode/settings.json
+.vscode/launch.json
 .idea/
 *.swp
 
-# Logs
+# ─── Logs ─────────────────────────────────────
 *.log
 
-# Build outputs
+# ─── Build outputs ────────────────────────────
 .next/
 coverage/
+.nuxt/
+out/
 
-# OpenClaw workspace config (never track)
-.openclaw/
-memory/
-AGENTS.md
-BOOTSTRAP.md
-HEARTBEAT.md
-IDENTITY.md
-SOUL.md
-TOOLS.md
-USER.md
+# ─── VS Code Extension ────────────────────────
+*.vsix
+
+# ─── Lock files (workspace root manages deps) ─
+apps/*/package-lock.json
+vscode-extension/package-lock.json
+
+# ─── Docker volumes (local dev) ───────────────
+pg_data/
+redis_data/
+nats_data/
