@@ -25,10 +25,25 @@ export function activate(context: vscode.ExtensionContext) {
 
   const config = vscode.workspace.getConfiguration("aiclew");
   const apiUrl = config.get<string>("apiUrl", "http://localhost:8081");
-  const apiKey = config.get<string>("apiKey", "");
 
-  const client = new AIClient(apiUrl, apiKey);
+  // 🔒 Use SecretStorage for the API key (not settings.json)
+  // Fallback: check settings only if SecretStorage is empty (migration path)
   const auth = new AuthManager(context);
+  let apiKey = auth.getApiKey();
+  if (!apiKey) {
+    // One-time migration: move plain-text apiKey to SecretStorage, then delete from settings
+    const legacyKey = config.get<string>("apiKey", "");
+    if (legacyKey) {
+      (async () => {
+        await auth.setApiKey(legacyKey);
+        await config.update("apiKey", undefined, vscode.ConfigurationTarget.Global);
+        console.log("Migrated API key from settings to SecretStorage");
+      })();
+      apiKey = legacyKey;
+    }
+  }
+
+  const client = new AIClient(apiUrl, apiKey ?? "");
   const diagnostics = new DiagnosticProvider();
   const sidebar = new SidebarProvider(context, client, auth, diagnostics);
 

@@ -23,15 +23,9 @@ export class AuthManager {
     return this.context.secrets.get(API_KEY_SECRET);
   }
 
-  // Check if user is logged in (has API key or stored session)
+  // Check if user is logged in (SecretStorage only)
   isLoggedIn(): boolean {
-    const apiKey = this.getApiKey();
-    if (apiKey) return true;
-
-    // Also check extension config for apiKey
-    const config = vscode.workspace.getConfiguration("aiclew");
-    const configuredKey = config.get<string>("apiKey");
-    return !!configuredKey;
+    return !!this.getApiKey();
   }
 
   // Get user info
