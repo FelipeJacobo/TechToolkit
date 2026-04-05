@@ -18,7 +18,24 @@ app.addHook("onRequest", async (req) => {
   }
 });
 
-app.register(cors, { origin: true });
+// 🔒 CORS: whitelist de orígenes permitidos (no abrir a todo el mundo)
+const ALLOWED_ORIGINS = (process.env.CORS_ALLOWED_ORIGINS ?? "")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
+
+app.register(cors, {
+  origin: ALLOWED_ORIGINS.length > 0
+    ? (origin, cb) => {
+        if (!origin || ALLOWED_ORIGINS.includes(origin)) {
+          cb(null, true);
+        } else {
+          cb(new Error("CORS: origin not allowed"), false);
+        }
+      }
+    : true, // Dev/local: allow all for convenience
+  credentials: true,
+});
 app.register(multipart);
 app.register(websocket);
 
